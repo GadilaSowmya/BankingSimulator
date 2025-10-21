@@ -2,39 +2,53 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 public class Account {
-    private String accountNumber;
+    private int accountNumber;
     private String holderName;
     private String email;
+    private String pin;
     private BigDecimal balance;
     private LocalDateTime createdAt;
 
-    public Account(String accountNumber, String holderName, String email, BigDecimal balance) {
-        this.accountNumber = accountNumber;
+    public Account(String holderName, String email, String pin, BigDecimal balance) {
         this.holderName = holderName;
         this.email = email;
+        this.pin = pin;
         this.balance = balance;
         this.createdAt = LocalDateTime.now();
     }
 
-    public void deposit(BigDecimal amount) {
+    public Account(int accountNumber, String holderName, BigDecimal balance) {
+        this.accountNumber = accountNumber;
+        this.holderName = holderName;
+        this.balance = balance;
+    }
+
+    public int getAccountNumber() {
+        return accountNumber;
+    }
+
+    public String getHolderName() {
+        return holderName;
+    }
+
+    public BigDecimal getBalance() {
+        return balance;
+    }
+
+    public void deposit(BigDecimal amount) throws Exception {
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            System.out.println("Deposit amount must be positive!");
-            return;
+            throw new Exception("Amount must be positive");
         }
         balance = balance.add(amount);
     }
 
     public void withdraw(BigDecimal amount) throws Exception {
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new Exception("Withdrawal amount must be positive!");
+            throw new Exception("Amount must be positive");
         }
-        if (amount.compareTo(balance) > 0) {
-            throw new Exception("Insufficient funds!");
+        if (balance.compareTo(amount) < 0) {
+            throw new Exception("Insufficient funds");
         }
         balance = balance.subtract(amount);
-    }
-
-    public BigDecimal getBalance() {
-        return balance;
     }
 }
