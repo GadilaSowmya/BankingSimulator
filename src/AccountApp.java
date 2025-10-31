@@ -38,17 +38,14 @@ public class AccountApp {
         sc.nextLine();
         String name = sc.nextLine().trim();
 
-        // Validate name
+        // Validating name
         if (!name.matches("^[A-Za-z]+( [A-Za-z]+)*$")) {
             System.out.println(" Invalid name! Only letters are allowed.");
             return;
         }
 
-
         System.out.print("Enter Email: ");
         String email = sc.next();
-
-
 
         //  Validate Email Format
         if (!email.matches("^[a-z0-9+_.-]+@[a-z0-9.-]+$")) {
@@ -186,17 +183,13 @@ public class AccountApp {
     }
 
     private static void withdraw(Connection conn) throws SQLException {
-        System.out.print("Enter amount to withdraw: ");
-        BigDecimal amount = sc.nextBigDecimal();
-
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            System.out.println(" Invalid amount.");
-            return;
-        }
+        BigDecimal amount = inputAmountWithRetry("withdraw");
+        if (amount.compareTo(BigDecimal.ZERO) == 0) return; // go back to menu
 
         PreparedStatement ps = conn.prepareStatement("SELECT balance FROM accounts WHERE account_number=?");
         ps.setInt(1, loggedInAccount);
         ResultSet rs = ps.executeQuery();
+
 
         if (rs.next()) {
             BigDecimal balance = rs.getBigDecimal("balance");
@@ -212,36 +205,57 @@ public class AccountApp {
                 System.out.println(" Insufficient funds!");
             }
         }
+        PreparedStatement logDep = conn.prepareStatement(
+                "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+        );
+        logDep.setInt(1, loggedInAccount);
+        logDep.setNull(2, Types.INTEGER);
+        logDep.setBigDecimal(3, amount);
+        logDep.setString(4, "DEPOSIT");
+        logDep.executeUpdate();
+
     }
+
 
     private static void transfer(Connection conn) throws SQLException {
         System.out.print("Enter Receiver Account Number: ");
         int toAcc = sc.nextInt();
+
         if (toAcc == loggedInAccount) {
             System.out.println(" Cannot transfer to your own account!");
             return;
         }
 
-        System.out.print("Enter Amount to Transfer: ");
-        BigDecimal amount = sc.nextBigDecimal();
-
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            System.out.println(" Invalid amount.");
-            return;
-        }
-
-        // Check if receiver account exists
-        PreparedStatement check = conn.prepareStatement("SELECT * FROM accounts WHERE account_number=?");
+        // Validate receiver account & fetch name
+        PreparedStatement check = conn.prepareStatement("SELECT holder_name FROM accounts WHERE account_number=?");
         check.setInt(1, toAcc);
-        if (!check.executeQuery().next()) {
-            System.out.println(" Transfer failed: Destination account not found!");
+        ResultSet rs = check.executeQuery();
+
+        if (!rs.next()) {
+            System.out.println(" Receiver account not found! Try again.");
             return;
         }
+
+        String receiverName = rs.getString("holder_name");
+        System.out.println(" Receiver Found: " + receiverName);
+
+        // Ask confirmation
+        System.out.print("Confirm transfer to " + receiverName + "? (Y/N): ");
+        String confirm = sc.next();
+        if (!confirm.equalsIgnoreCase("Y")) {
+            System.out.println(" Transfer cancelled.");
+            return;
+        }
+
+        // Get amount with retry logic
+        BigDecimal amount = inputAmountWithRetry("transfer");
+        if (amount.compareTo(BigDecimal.ZERO) == 0) return;
 
         conn.setAutoCommit(false);
         try {
-            // Withdraw from sender
-            PreparedStatement withdraw = conn.prepareStatement("UPDATE accounts SET balance = balance - ? WHERE account_number=? AND balance >= ?");
+            PreparedStatement withdraw = conn.prepareStatement(
+                    "UPDATE accounts SET balance = balance - ? WHERE account_number=? AND balance >= ?"
+            );
             withdraw.setBigDecimal(1, amount);
             withdraw.setInt(2, loggedInAccount);
             withdraw.setBigDecimal(3, amount);
@@ -253,22 +267,30 @@ public class AccountApp {
                 return;
             }
 
-            // Deposit to receiver
-            PreparedStatement deposit = conn.prepareStatement("UPDATE accounts SET balance = balance + ? WHERE account_number=?");
+            // Deposit into receiver
+            PreparedStatement deposit = conn.prepareStatement(
+                    "UPDATE accounts SET balance = balance + ? WHERE account_number=?"
+            );
             deposit.setBigDecimal(1, amount);
             deposit.setInt(2, toAcc);
             deposit.executeUpdate();
 
-            // Log transaction
-            PreparedStatement log = conn.prepareStatement("INSERT INTO transactions(from_account, to_account, amount) VALUES (?, ?, ?)");
-            log.setInt(1, loggedInAccount);
-            log.setInt(2, toAcc);
-            log.setBigDecimal(3, amount);
-            log.executeUpdate();
+
+// Log credit transaction for receiver
+            PreparedStatement logCredit = conn.prepareStatement(
+                    "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+            );
+            logCredit.setInt(1, loggedInAccount);
+            logCredit.setInt(2, toAcc);
+            logCredit.setBigDecimal(3, amount);
+            logCredit.setString(4, "Transfer");
+            logCredit.executeUpdate();
+
 
             conn.commit();
-            System.out.println(" Transfer successful!");
+            System.out.println(" Transfer successful to " + receiverName + "!");
             viewBalance(conn, loggedInAccount);
+
         } catch (SQLException e) {
             conn.rollback();
             System.out.println(" Transfer failed: " + e.getMessage());
@@ -290,12 +312,16 @@ public class AccountApp {
         int limit = sc.nextInt();
 
         PreparedStatement ps = conn.prepareStatement(
-                "SELECT * FROM transactions WHERE from_account = ? OR to_account = ? ORDER BY created_at DESC LIMIT ?"
+                "SELECT * FROM transactions " +
+                        "WHERE from_account = ? OR to_account = ? " +
+                        "ORDER BY created_at DESC LIMIT ?"
         );
+
         ps.setInt(1, loggedInAccount);
         ps.setInt(2, loggedInAccount);
         ps.setInt(3, limit);
         ResultSet rs = ps.executeQuery();
+
 
         System.out.println("\n===== RECENT TRANSACTIONS =====");
         System.out.printf("%-5s %-12s %-12s %-10s %-10s %-20s\n",
@@ -344,7 +370,7 @@ public class AccountApp {
                 System.out.print("Choose: ");
 
                 if (!sc.hasNextInt()) {
-                    System.out.println("⚠ Enter only 1 or 2!");
+                    System.out.println(" Enter only 1 or 2!");
                     sc.next();
                     continue;
                 }
@@ -356,7 +382,7 @@ public class AccountApp {
                 } else if (choice == 2) {
                     return BigDecimal.ZERO; // Back to menu
                 } else {
-                    System.out.println("⚠ Invalid choice! Enter 1 or 2 only.");
+                    System.out.println(" Invalid choice! Enter 1 or 2 only.");
                 }
             }
         }
