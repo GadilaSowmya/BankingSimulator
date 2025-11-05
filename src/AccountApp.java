@@ -3,6 +3,14 @@ import java.math.BigDecimal;
 import java.sql.*;
 import java.util.Scanner;
 
+import jakarta.mail.*;
+import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeMessage;
+import java.util.Properties;
+import java.util.Random;
+
+
+
 public class AccountApp {
     private static final Scanner sc = new Scanner(System.in);
     private static Integer loggedInAccount = null; // Store logged-in user's account number
@@ -13,15 +21,17 @@ public class AccountApp {
             while (true) {
                 System.out.println("\n===== BANKING SYSTEM =====");
                 System.out.println("1 Create Account");
-                System.out.println("2 Login");
-                System.out.println("3️ Exit");
+                System.out.println("2 Login as User");
+                System.out.println("3 Login as Admin");
+                System.out.println("4 Exit");
                 System.out.print("Choose an option: ");
                 int choice = sc.nextInt();
 
                 switch (choice) {
                     case 1 -> createAccount(conn);
                     case 2 -> login(conn);
-                    case 3 -> {
+                    case 3 -> adminLogin(conn);
+                    case 4 -> {
                         System.out.println(" Thank you for using our bank!");
                         return;
                     }
@@ -34,56 +44,95 @@ public class AccountApp {
     }
 
     private static void createAccount(Connection conn) throws SQLException {
-        System.out.print("Enter Name: ");
-        sc.nextLine();
-        String name = sc.nextLine().trim();
+        sc.nextLine(); // clear buffer
 
-        // Validating name
-        if (!name.matches("^[A-Za-z]+( [A-Za-z]+)*$")) {
-            System.out.println(" Invalid name! Only letters are allowed.");
-            return;
+        String name, email, pin;
+        BigDecimal balance;
+
+        // ---- NAME INPUT LOOP ----
+        while (true) {
+            System.out.print("Enter Name: ");
+            name = sc.nextLine().trim();
+
+            if (name.matches("^[A-Za-z]+( [A-Za-z]+)*$")) break;
+
+            System.out.println(" Invalid name! Only alphabets allowed.");
+            if (!retryPrompt()) return;
         }
 
-        System.out.print("Enter Email: ");
-        String email = sc.next();
+        // ---- EMAIL INPUT LOOP + OTP VERIFY ----
+        while (true) {
+            System.out.print("Enter Email: ");
+            email = sc.next();
 
-        //  Validate Email Format
-        if (!email.matches("^[a-z0-9+_.-]+@[a-z0-9.-]+$")) {
-            System.out.println(" Invalid email format! Please enter a valid email like example@gmail.com");
-            return;
+            if (!email.matches("^[a-z0-9+_.-]+@[a-z0-9.-]+$")) {
+                System.out.println(" Invalid email format!");
+                if (!retryPrompt()) return;
+                continue;
+            }
+
+            PreparedStatement checkEmail = conn.prepareStatement("SELECT * FROM accounts WHERE email = ?");
+            checkEmail.setString(1, email);
+            ResultSet rs = checkEmail.executeQuery();
+
+            if (rs.next()) {
+                System.out.println(" Account with this email already exists!");
+                if (!retryPrompt()) return;
+                continue;
+            }
+
+            // ---- Send OTP ----
+            System.out.println(" Sending OTP to " + email + "...");
+            String otp = sendOTP(email);
+
+            if (otp == null || otp.isEmpty()) {
+                System.out.println(" Failed to send OTP. Please try again with a valid email.");
+                if (!retryPrompt()) return;
+                continue;
+            }
+
+            System.out.print("Enter OTP received in email: ");
+            String userOtp = sc.next();
+
+            if (!userOtp.equals(otp)) {
+                System.out.println("  Incorrect OTP! Email verification failed.");
+                if (!retryPrompt()) return;
+                continue;
+            }
+
+            System.out.println("  Email verified successfully!");
+            break;
         }
 
-        //  Check if email already exists
-        PreparedStatement checkEmail = conn.prepareStatement("SELECT * FROM accounts WHERE email = ?");
-        checkEmail.setString(1, email);
-        ResultSet rs = checkEmail.executeQuery();
-        if (rs.next()) {
-            System.out.println(" Account with this email already exists!");
-            return;
-        }
+        // ---- PIN INPUT LOOP ----
+        while (true) {
+            System.out.print("Set 4-digit PIN: ");
+            pin = sc.next();
 
-        System.out.print("Set 4-digit PIN: ");
-        String pin = sc.next();
+            if (pin.matches("\\d{4}")) break;
 
-        // Validate PIN Format
-        if (!pin.matches("\\d{4}")) {
             System.out.println(" PIN must be exactly 4 digits!");
-            return;
+            if (!retryPrompt()) return;
         }
 
-        System.out.print("Enter Initial Deposit: ");
-        BigDecimal balance = sc.nextBigDecimal();
+        // ---- INITIAL BALANCE LOOP ----
+        while (true) {
+            System.out.print("Enter Initial Deposit (Min 500/-): ");
 
-        if (balance.compareTo(BigDecimal.ZERO) <= 0) {
-            System.out.println(" Initial deposit must be positive!");
-            return;
+            if (!sc.hasNextBigDecimal()) {
+                System.out.println(" Enter numbers only!");
+                sc.next();
+                if (!retryPrompt()) return;
+                continue;
+            }
+
+            balance = sc.nextBigDecimal();
+
+            if (balance.compareTo(new BigDecimal("500")) >= 0) break;
+
+            System.out.println(" Minimum initial deposit is 500!");
+            if (!retryPrompt()) return;
         }
-
-        if (balance.compareTo(new BigDecimal("500")) < 0) {
-            System.out.println(" Minimum initial deposit is 500");
-            return;
-        }
-
 
         PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO accounts(holder_name, email, pin, balance) VALUES (?, ?, ?, ?)",
@@ -93,13 +142,64 @@ public class AccountApp {
         ps.setString(2, email);
         ps.setString(3, pin);
         ps.setBigDecimal(4, balance);
-
         ps.executeUpdate();
+
         ResultSet keys = ps.getGeneratedKeys();
         if (keys.next()) {
-            System.out.println(" Account created successfully! Your Account Number: " + keys.getInt(1));
+            System.out.println("\n🎉 Account Created Successfully!");
+            System.out.println(" Your Account Number: " + keys.getInt(1));
         }
     }
+
+
+    private static boolean retryPrompt() {
+        System.out.println("\n1 Try Again");
+        System.out.println("2 Exit to Main Menu");
+        System.out.print("Choose: ");
+
+        if (!sc.hasNextInt()) { sc.next(); return false; }
+
+        int ch = sc.nextInt();
+        sc.nextLine();
+
+        return ch == 1;
+    }
+
+
+    private static String sendOTP(String email) {
+        String otp = String.valueOf(100000 + new Random().nextInt(900000));
+
+        final String senderEmail = "gadilasowmya147@gmail.com";
+        final String senderPassword = "pkay chfx qyst gnvy";
+
+        Properties props = new Properties();
+        props.put("mail.smtp.auth", "true");
+        props.put("mail.smtp.starttls.enable", "true");
+        props.put("mail.smtp.host", "smtp.gmail.com");
+        props.put("mail.smtp.port", "587");
+
+        Session session = Session.getInstance(props, new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(senderEmail, senderPassword);
+            }
+        });
+
+        try {
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(senderEmail));
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(email));
+            message.setSubject("Bank Login OTP Verification");
+            message.setText("Your OTP for Login: " + otp);
+
+            Transport.send(message);
+            System.out.println(" OTP sent to your email!");
+        } catch (Exception e) {
+            System.out.println(" Failed to send OTP: " + e.getMessage());
+        }
+        return otp;
+    }
+
 
     private static void login(Connection conn) throws SQLException {
         while (true) {
@@ -115,9 +215,22 @@ public class AccountApp {
 
             if (rs.next()) {
                 loggedInAccount = accNo;
+                String email = rs.getString("email");
+                String otp = sendOTP(email);
+
+                System.out.print("Enter OTP sent to email: ");
+                String userOtp = sc.next();
+
+                if (!otp.equals(userOtp)) {
+                    System.out.println(" Incorrect OTP! Login failed.");
+                    return;
+                }
+
                 System.out.println("\n Login successful! Welcome, " + rs.getString("holder_name") + "!");
+                loggedInAccount = accNo;
                 accountMenu(conn);
-                return; // exit login loop after success
+                return;
+
             } else {
                 System.out.println("\n Invalid Account Number or PIN!");
 
@@ -136,6 +249,122 @@ public class AccountApp {
         }
     }
 
+
+    private static void adminLogin(Connection conn) throws SQLException {
+        System.out.print("Enter Admin Username: ");
+        String username = sc.next();
+        System.out.print("Enter Admin Password: ");
+        String password = sc.next();
+
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM admin WHERE username=? AND password=?");
+        ps.setString(1, username);
+        ps.setString(2, password);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            System.out.println("\n Admin Login Successful!");
+            adminMenu(conn);
+        } else {
+            System.out.println(" Invalid Admin Credentials!");
+        }
+    }
+
+
+    private static void adminMenu(Connection conn) throws SQLException {
+        while (true) {
+            System.out.println("\n===== ADMIN PANEL =====");
+            System.out.println("1 View All Accounts");
+            System.out.println("2 Search Account");
+            System.out.println("3 Delete Account");
+            System.out.println("4 View All Transactions");
+            System.out.println("5 Logout");
+            System.out.print("Choose an option: ");
+            int choice = sc.nextInt();
+
+            switch (choice) {
+                case 1 -> viewAllAccounts(conn);
+                case 2 -> searchAccount(conn);
+                case 3 -> deleteAccount(conn);
+                case 4 -> viewAllTransactions(conn);
+                case 5 -> { return; }
+                default -> System.out.println(" Invalid choice.");
+            }
+        }
+    }
+
+
+    private static void viewAllAccounts(Connection conn) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM accounts");
+        ResultSet rs = ps.executeQuery();
+
+        System.out.printf("%-10s %-20s %-25s %-10s\n", "Acc No", "Name", "Email", "Balance");
+        while (rs.next()) {
+            System.out.printf("%-10s %-20s %-25s %-10s\n",
+                    rs.getInt("account_number"),
+                    rs.getString("holder_name"),
+                    rs.getString("email"),
+                    rs.getBigDecimal("balance"));
+        }
+    }
+
+    private static void searchAccount(Connection conn) throws SQLException {
+        System.out.print("Enter Account Number: ");
+        int acc = sc.nextInt();
+
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM accounts WHERE account_number=?");
+        ps.setInt(1, acc);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            System.out.println("Account Number: " + rs.getInt("account_number"));
+            System.out.println("Holder Name: " + rs.getString("holder_name"));
+            System.out.println("Email: " + rs.getString("email"));
+            System.out.println("Balance: " + rs.getBigDecimal("balance"));
+        } else {
+            System.out.println(" Account Not Found!");
+        }
+    }
+
+    private static void deleteAccount(Connection conn) throws SQLException {
+        System.out.print("Enter Account Number to Delete: ");
+        int acc = sc.nextInt();
+
+        PreparedStatement ps = conn.prepareStatement(
+                "DELETE FROM accounts WHERE account_number=?");
+        ps.setInt(1, acc);
+
+        int rows = ps.executeUpdate();
+        if (rows > 0) {
+            System.out.println(" Account Deleted Successfully");
+        } else {
+            System.out.println(" Account Not Found!");
+        }
+    }
+
+
+    private static void viewAllTransactions(Connection conn) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM transactions ORDER BY created_at DESC");
+        ResultSet rs = ps.executeQuery();
+
+        System.out.println("\n===== ALL TRANSACTIONS =====");
+        System.out.printf("%-5s %-12s %-12s %-20s %-15s %-20s\n",
+                "ID", "From", "To", "Type", "Amount", "Time");
+
+        while (rs.next()) {
+            System.out.printf("%-5d %-12s %-12s %-10s %-10s %-20s\n",
+                    rs.getInt("id"),
+                    rs.getString("from_account"),
+                    rs.getString("to_account") == null ? "-" : rs.getString("to_account"),
+                    rs.getString("type"),
+                    rs.getBigDecimal("amount"),
+                    rs.getTimestamp("created_at"));
+        }
+    }
+
+
     private static void accountMenu(Connection conn) throws SQLException {
         while (true) {
             System.out.println("\n===== ACCOUNT MENU =====");
@@ -144,7 +373,8 @@ public class AccountApp {
             System.out.println("3️ Transfer");
             System.out.println("4️ View Balance");
             System.out.println("5 View Transactions");
-            System.out.println("6️ Logout");
+            System.out.println("6 View Account Details");
+            System.out.println("7 Logout");
             System.out.print("Choose an option: ");
             int choice = sc.nextInt();
 
@@ -154,50 +384,90 @@ public class AccountApp {
                 case 3 -> transfer(conn);
                 case 4 -> viewBalance(conn, loggedInAccount);
                 case 5 -> viewTransactions(conn);
-                case 6 -> {
+                case 6 -> viewAccountDetails(conn);
+                case 7 -> {
                     System.out.println(" Logged out successfully!");
                     loggedInAccount = null;
                     return;
                 }
+
                 default -> System.out.println(" Invalid choice.");
             }
         }
     }
 
+    private static void viewAccountDetails(Connection conn) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT account_number, holder_name, email, balance FROM accounts WHERE account_number=?"
+        );
+        ps.setInt(1, loggedInAccount);
+        ResultSet rs = ps.executeQuery();
+
+        if (rs.next()) {
+            System.out.println("\n===== ACCOUNT DETAILS =====");
+            System.out.println("Account Number : " + rs.getInt("account_number"));
+            System.out.println("Account Holder : " + rs.getString("holder_name"));
+            System.out.println("Email          : " + rs.getString("email"));
+            System.out.println("Balance        : " + rs.getBigDecimal("balance"));
+        } else {
+            System.out.println("Account details not found!");
+        }
+    }
+
     private static void deposit(Connection conn) throws SQLException {
         BigDecimal amount = inputAmountWithRetry("deposit");
-        if (amount.compareTo(BigDecimal.ZERO) == 0) return; // exit to menu
+        if (amount.compareTo(BigDecimal.ZERO) == 0) return;
 
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            System.out.println(" Invalid amount.");
-            return;
-        }
-
-        PreparedStatement ps = conn.prepareStatement("UPDATE accounts SET balance = balance + ? WHERE account_number=?");
+        PreparedStatement ps = conn.prepareStatement(
+                "UPDATE accounts SET balance = balance + ? WHERE account_number=?"
+        );
         ps.setBigDecimal(1, amount);
         ps.setInt(2, loggedInAccount);
         ps.executeUpdate();
+
+        // Log Transaction (CREDIT)
+        PreparedStatement log = conn.prepareStatement(
+                "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+        );
+        log.setNull(1, loggedInAccount);
+        log.setInt(2, loggedInAccount);
+        log.setBigDecimal(3, amount);
+        log.setString(4, "DEPOSIT");
+        log.executeUpdate();
 
         System.out.println(" Deposit successful!");
         viewBalance(conn, loggedInAccount);
     }
 
+
     private static void withdraw(Connection conn) throws SQLException {
         BigDecimal amount = inputAmountWithRetry("withdraw");
-        if (amount.compareTo(BigDecimal.ZERO) == 0) return; // go back to menu
+        if (amount.compareTo(BigDecimal.ZERO) == 0) return;
 
         PreparedStatement ps = conn.prepareStatement("SELECT balance FROM accounts WHERE account_number=?");
         ps.setInt(1, loggedInAccount);
         ResultSet rs = ps.executeQuery();
 
-
         if (rs.next()) {
             BigDecimal balance = rs.getBigDecimal("balance");
+
             if (balance.compareTo(amount) >= 0) {
-                PreparedStatement update = conn.prepareStatement("UPDATE accounts SET balance = balance - ? WHERE account_number=?");
+                PreparedStatement update = conn.prepareStatement(
+                        "UPDATE accounts SET balance = balance - ? WHERE account_number=?"
+                );
                 update.setBigDecimal(1, amount);
                 update.setInt(2, loggedInAccount);
                 update.executeUpdate();
+
+                // Log Transaction (DEBIT)
+                PreparedStatement log = conn.prepareStatement(
+                        "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+                );
+                log.setInt(1, loggedInAccount);
+                log.setNull(2, loggedInAccount);
+                log.setBigDecimal(3, amount);
+                log.setString(4, "WITHDRAW");
+                log.executeUpdate();
 
                 System.out.println(" Withdrawal successful!");
                 viewBalance(conn, loggedInAccount);
@@ -205,15 +475,6 @@ public class AccountApp {
                 System.out.println(" Insufficient funds!");
             }
         }
-        PreparedStatement logDep = conn.prepareStatement(
-                "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
-        );
-        logDep.setInt(1, loggedInAccount);
-        logDep.setNull(2, Types.INTEGER);
-        logDep.setBigDecimal(3, amount);
-        logDep.setString(4, "DEPOSIT");
-        logDep.executeUpdate();
-
     }
 
 
@@ -276,15 +537,28 @@ public class AccountApp {
             deposit.executeUpdate();
 
 
-// Log credit transaction for receiver
-            PreparedStatement logCredit = conn.prepareStatement(
+
+            // Log for sender (Debit)
+            PreparedStatement logSender = conn.prepareStatement(
                     "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
             );
-            logCredit.setInt(1, loggedInAccount);
-            logCredit.setInt(2, toAcc);
-            logCredit.setBigDecimal(3, amount);
-            logCredit.setString(4, "Transfer");
-            logCredit.executeUpdate();
+            logSender.setInt(1, loggedInAccount); // sender
+            logSender.setInt(2, toAcc);           // receiver
+            logSender.setBigDecimal(3, amount);
+            logSender.setString(4, "TRANSFER_SENT");
+            logSender.executeUpdate();
+
+
+// Log for receiver (Credit)
+            PreparedStatement logReceiver = conn.prepareStatement(
+                    "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+            );
+            logReceiver.setInt(1, toAcc);           // receiver
+            logReceiver.setInt(2, loggedInAccount); // sender
+            logReceiver.setBigDecimal(3, amount);
+            logReceiver.setString(4, "TRANSFER_RECEIVED");
+            logReceiver.executeUpdate();
+
 
 
             conn.commit();
