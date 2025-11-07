@@ -8,7 +8,12 @@ import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import java.util.Properties;
 import java.util.Random;
-
+import jakarta.mail.internet.*;
+import java.util.Properties;
+import java.util.Random;
+import java.io.File;
+import jakarta.activation.DataHandler;
+import jakarta.activation.FileDataSource;
 
 
 public class AccountApp {
@@ -23,7 +28,9 @@ public class AccountApp {
                 System.out.println("1 Create Account");
                 System.out.println("2 Login as User");
                 System.out.println("3 Login as Admin");
-                System.out.println("4 Exit");
+                System.out.println("4 Forgot PIN");
+
+                System.out.println("5 Exit");
                 System.out.print("Choose an option: ");
                 int choice = sc.nextInt();
 
@@ -31,7 +38,8 @@ public class AccountApp {
                     case 1 -> createAccount(conn);
                     case 2 -> login(conn);
                     case 3 -> adminLogin(conn);
-                    case 4 -> {
+                    case 4 -> forgotPin(conn);
+                    case 5 -> {
                         System.out.println(" Thank you for using our bank!");
                         return;
                     }
@@ -201,6 +209,52 @@ public class AccountApp {
     }
 
 
+    private static void sendStatementByEmail(String toEmail, String filePath) {
+        final String senderEmail = "gadilasowmya147@gmail.com";
+        final String senderPassword = "pkay chfx qyst gnvy";
+
+        Properties props = new Properties();
+        props.put("mail.smtp.auth", "true");
+        props.put("mail.smtp.starttls.enable", "true");
+        props.put("mail.smtp.host", "smtp.gmail.com");
+        props.put("mail.smtp.port", "587");
+
+        Session session = Session.getInstance(props, new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(senderEmail, senderPassword);
+            }
+        });
+
+        try {
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(senderEmail));
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(toEmail));
+            message.setSubject("Your Bank Account Statement");
+
+            // Email body
+            MimeBodyPart textPart = new MimeBodyPart();
+            textPart.setText("Dear Customer,\n\nPlease find attached your latest bank account statement.\n\nRegards,\nBank Support");
+
+            // Attachment
+            MimeBodyPart attachmentPart = new MimeBodyPart();
+            attachmentPart.attachFile(new java.io.File(filePath));
+
+            // Combine both parts
+            Multipart multipart = new MimeMultipart();
+            multipart.addBodyPart(textPart);
+            multipart.addBodyPart(attachmentPart);
+
+            message.setContent(multipart);
+
+            Transport.send(message);
+            System.out.println(" Statement sent successfully to: " + toEmail);
+
+        } catch (Exception e) {
+            System.out.println(" Failed to send email: " + e.getMessage());
+        }
+    }
+
     private static void login(Connection conn) throws SQLException {
         while (true) {
             System.out.print("Enter Account Number: ");
@@ -247,6 +301,95 @@ public class AccountApp {
                 }
             }
         }
+    }
+
+
+    private static void forgotPin(Connection conn) throws SQLException {
+        sc.nextLine();
+        System.out.print("Enter your registered email: ");
+        String email = sc.nextLine().trim();
+
+        // Check if email exists
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM accounts WHERE email=?");
+        ps.setString(1, email);
+        ResultSet rs = ps.executeQuery();
+
+        if (!rs.next()) {
+            System.out.println(" No account found with this email!");
+            return;
+        }
+
+        System.out.println(" Account found! Sending OTP to " + email);
+        String otp = sendOTP(email);
+
+        if (otp == null) {
+            System.out.println(" Failed to send OTP. Please try again later.");
+            return;
+        }
+
+        System.out.print("Enter OTP received in your email: ");
+        String userOtp = sc.nextLine().trim();
+
+        if (!otp.equals(userOtp)) {
+            System.out.println(" Incorrect OTP! PIN reset failed.");
+            return;
+        }
+
+        // OTP verified → set new PIN
+        String newPin;
+        while (true) {
+            System.out.print("Enter new 4-digit PIN: ");
+            newPin = sc.nextLine().trim();
+
+            if (newPin.matches("\\d{4}")) break;
+            System.out.println(" PIN must be exactly 4 digits!");
+        }
+
+        PreparedStatement update = conn.prepareStatement("UPDATE accounts SET pin=? WHERE email=?");
+        update.setString(1, newPin);
+        update.setString(2, email);
+        update.executeUpdate();
+
+        System.out.println(" Your PIN has been reset successfully!");
+        // ---- Send confirmation email ----
+        try {
+            final String senderEmail = "gadilasowmya147@gmail.com";
+            final String senderPassword = "pkay chfx qyst gnvy";
+
+            Properties props = new Properties();
+            props.put("mail.smtp.auth", "true");
+            props.put("mail.smtp.starttls.enable", "true");
+            props.put("mail.smtp.host", "smtp.gmail.com");
+            props.put("mail.smtp.port", "587");
+
+            Session session = Session.getInstance(props, new Authenticator() {
+                @Override
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication(senderEmail, senderPassword);
+                }
+            });
+
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(senderEmail));
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(email));
+            message.setSubject("PIN Reset Confirmation - SecureBank");
+            message.setText("""
+            Dear Customer,
+            
+            Your account PIN has been successfully reset.
+            
+            If you did not request this change, please contact our support team immediately.
+            
+            Thank you,
+            SecureBank Security Team
+            """);
+
+            Transport.send(message);
+            System.out.println(" Confirmation email sent to " + email);
+        } catch (Exception e) {
+            System.out.println(" Failed to send confirmation email: " + e.getMessage());
+        }
+
     }
 
 
@@ -374,7 +517,10 @@ public class AccountApp {
             System.out.println("4️ View Balance");
             System.out.println("5 View Transactions");
             System.out.println("6 View Account Details");
-            System.out.println("7 Logout");
+            System.out.println("7 Download Statement");
+
+            System.out.println("8 Logout");
+
             System.out.print("Choose an option: ");
             int choice = sc.nextInt();
 
@@ -385,7 +531,9 @@ public class AccountApp {
                 case 4 -> viewBalance(conn, loggedInAccount);
                 case 5 -> viewTransactions(conn);
                 case 6 -> viewAccountDetails(conn);
-                case 7 -> {
+                case 7 -> downloadStatement(conn);
+
+                case 8 -> {
                     System.out.println(" Logged out successfully!");
                     loggedInAccount = null;
                     return;
@@ -512,6 +660,8 @@ public class AccountApp {
         BigDecimal amount = inputAmountWithRetry("transfer");
         if (amount.compareTo(BigDecimal.ZERO) == 0) return;
 
+
+
         conn.setAutoCommit(false);
         try {
             PreparedStatement withdraw = conn.prepareStatement(
@@ -564,6 +714,8 @@ public class AccountApp {
             conn.commit();
             System.out.println(" Transfer successful to " + receiverName + "!");
             viewBalance(conn, loggedInAccount);
+            FraudDetection.checkFraud(conn, loggedInAccount, amount);
+
 
         } catch (SQLException e) {
             conn.rollback();
@@ -618,6 +770,79 @@ public class AccountApp {
             System.out.println("No transactions found.");
         }
     }
+
+
+    private static void downloadStatement(Connection conn) throws SQLException {
+        PreparedStatement accStmt = conn.prepareStatement(
+                "SELECT holder_name FROM accounts WHERE account_number=?"
+        );
+        accStmt.setInt(1, loggedInAccount);
+        ResultSet accRs = accStmt.executeQuery();
+
+        if (!accRs.next()) {
+            System.out.println("Account not found!");
+            return;
+        }
+
+        String holderName = accRs.getString("holder_name");
+
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM transactions WHERE from_account=? OR to_account=? ORDER BY created_at DESC"
+        );
+        ps.setInt(1, loggedInAccount);
+        ps.setInt(2, loggedInAccount);
+        ResultSet rs = ps.executeQuery();
+
+        String fileName = "Statement_" + loggedInAccount + ".pdf";
+
+        try {
+            com.itextpdf.text.Document document = new com.itextpdf.text.Document();
+            com.itextpdf.text.pdf.PdfWriter.getInstance(document, new java.io.FileOutputStream(fileName));
+
+            document.open();
+            document.add(new com.itextpdf.text.Paragraph("BANK ACCOUNT STATEMENT"));
+            document.add(new com.itextpdf.text.Paragraph("Account Number: " + loggedInAccount));
+            document.add(new com.itextpdf.text.Paragraph("Account Holder: " + holderName));
+            document.add(new com.itextpdf.text.Paragraph("Generated On: " + new java.util.Date()));
+            document.add(new com.itextpdf.text.Paragraph("\n--------------------------------------------\n"));
+
+            com.itextpdf.text.pdf.PdfPTable table = new com.itextpdf.text.pdf.PdfPTable(5);
+            table.addCell("Type");
+            table.addCell("From");
+            table.addCell("To");
+            table.addCell("Amount");
+            table.addCell("Date");
+
+            while (rs.next()) {
+                table.addCell(rs.getString("type"));
+                table.addCell(rs.getString("from_account"));
+                table.addCell(rs.getString("to_account") == null ? "-" : rs.getString("to_account"));
+                table.addCell(rs.getBigDecimal("amount").toPlainString());
+                table.addCell(rs.getTimestamp("created_at").toString());
+            }
+
+            document.add(table);
+            document.close();
+
+            System.out.println("\n📄 Statement downloaded successfully: " + fileName);
+
+// Fetch user email to send statement
+            PreparedStatement emailStmt = conn.prepareStatement("SELECT email FROM accounts WHERE account_number=?");
+            emailStmt.setInt(1, loggedInAccount);
+            ResultSet emailRs = emailStmt.executeQuery();
+
+            if (emailRs.next()) {
+                String userEmail = emailRs.getString("email");
+                sendStatementByEmail(userEmail, fileName);
+            } else {
+                System.out.println("⚠ Unable to fetch user email for sending statement.");
+            }
+        }
+         catch (Exception e) {
+             System.out.println("Error generating PDF: " + e.getMessage());
+        }
+    }
+
 
     private static BigDecimal inputAmountWithRetry(String action) {
         while (true) {
