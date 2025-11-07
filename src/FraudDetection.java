@@ -35,7 +35,7 @@ public class FraudDetection {
                 reason = "Multiple transfers (5+) within 1 minute.";
             }
 
-            // 🚨 3️⃣ If suspicious, insert record & send email alert
+            //  3️⃣ If suspicious, insert record & send email alert
             if (suspicious) {
                 PreparedStatement alertPs = conn.prepareStatement(
                         "INSERT INTO fraud_alerts(account_number, reason, timestamp) VALUES (?, ?, NOW())"

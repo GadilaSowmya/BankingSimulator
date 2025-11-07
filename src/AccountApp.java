@@ -698,7 +698,6 @@ public class AccountApp {
             logSender.setString(4, "TRANSFER_SENT");
             logSender.executeUpdate();
 
-
 // Log for receiver (Credit)
             PreparedStatement logReceiver = conn.prepareStatement(
                     "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
