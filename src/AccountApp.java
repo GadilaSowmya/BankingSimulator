@@ -692,8 +692,8 @@ public class AccountApp {
             PreparedStatement logSender = conn.prepareStatement(
                     "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
             );
-            logSender.setInt(1, loggedInAccount); // sender
-            logSender.setInt(2, toAcc);           // receiver
+            logSender.setInt(1, loggedInAccount);
+            logSender.setInt(2, toAcc);
             logSender.setBigDecimal(3, amount);
             logSender.setString(4, "TRANSFER_SENT");
             logSender.executeUpdate();

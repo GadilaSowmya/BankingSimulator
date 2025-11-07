@@ -16,7 +16,7 @@ public class FraudDetection {
             String reason = "";
 
             // 🧾 1️⃣ Check high-value transactions
-            if (amount.compareTo(new BigDecimal("15000")) > 0) {
+            if (amount.compareTo(new BigDecimal("20000")) > 0) {
                 suspicious = true;
                 reason = "High-value transaction detected (₹" + amount + ")";
             }
