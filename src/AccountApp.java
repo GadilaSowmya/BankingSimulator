@@ -209,6 +209,8 @@ public class AccountApp {
     }
 
 
+
+
     private static void sendStatementByEmail(String toEmail, String filePath) {
         final String senderEmail = "gadilasowmya147@gmail.com";
         final String senderPassword = "pkay chfx qyst gnvy";
@@ -474,18 +476,27 @@ public class AccountApp {
         System.out.print("Enter Account Number to Delete: ");
         int acc = sc.nextInt();
 
-        PreparedStatement ps = conn.prepareStatement(
-                "DELETE FROM accounts WHERE account_number=?");
-        ps.setInt(1, acc);
+        // Delete all related transactions first
+        PreparedStatement delTrans = conn.prepareStatement(
+                "DELETE FROM transactions WHERE from_account=? OR to_account=?"
+        );
+        delTrans.setInt(1, acc);
+        delTrans.setInt(2, acc);
+        delTrans.executeUpdate();
 
+        // Then delete the account
+        PreparedStatement ps = conn.prepareStatement(
+                "DELETE FROM accounts WHERE account_number=?"
+        );
+        ps.setInt(1, acc);
         int rows = ps.executeUpdate();
+
         if (rows > 0) {
-            System.out.println(" Account Deleted Successfully");
+            System.out.println(" Account and related transactions deleted successfully!");
         } else {
             System.out.println(" Account Not Found!");
         }
     }
-
 
     private static void viewAllTransactions(Connection conn) throws SQLException {
         PreparedStatement ps = conn.prepareStatement(
@@ -619,6 +630,8 @@ public class AccountApp {
 
                 System.out.println(" Withdrawal successful!");
                 viewBalance(conn, loggedInAccount);
+                BalanceAlert.checkLowBalance(conn, loggedInAccount);
+
             } else {
                 System.out.println(" Insufficient funds!");
             }
@@ -627,102 +640,117 @@ public class AccountApp {
 
 
     private static void transfer(Connection conn) throws SQLException {
-        System.out.print("Enter Receiver Account Number: ");
-        int toAcc = sc.nextInt();
+        System.out.print("Enter recipient account number: ");
+        int toAccount = sc.nextInt();
 
-        if (toAcc == loggedInAccount) {
-            System.out.println(" Cannot transfer to your own account!");
+        System.out.print("Enter amount to transfer: ");
+        BigDecimal amount = sc.nextBigDecimal();
+
+        // Step 1: Verify sender
+        PreparedStatement psSender = conn.prepareStatement(
+                "SELECT holder_name, email, balance FROM accounts WHERE account_number = ?"
+        );
+        psSender.setInt(1, loggedInAccount);
+        ResultSet rsSender = psSender.executeQuery();
+
+        if (!rsSender.next()) {
+            System.out.println("⚠ Invalid sender account!");
             return;
         }
 
-        // Validate receiver account & fetch name
-        PreparedStatement check = conn.prepareStatement("SELECT holder_name FROM accounts WHERE account_number=?");
-        check.setInt(1, toAcc);
-        ResultSet rs = check.executeQuery();
+        String senderName = rsSender.getString("holder_name");
+        String senderEmail = rsSender.getString("email");
+        BigDecimal senderBalance = rsSender.getBigDecimal("balance");
 
-        if (!rs.next()) {
-            System.out.println(" Receiver account not found! Try again.");
+        if (senderBalance.compareTo(amount) < 0) {
+            System.out.println(" Insufficient funds!");
             return;
         }
 
-        String receiverName = rs.getString("holder_name");
-        System.out.println(" Receiver Found: " + receiverName);
+        // Step 2: Verify recipient
+        PreparedStatement psReceiver = conn.prepareStatement(
+                "SELECT holder_name FROM accounts WHERE account_number = ?"
+        );
+        psReceiver.setInt(1, toAccount);
+        ResultSet rsReceiver = psReceiver.executeQuery();
 
-        // Ask confirmation
-        System.out.print("Confirm transfer to " + receiverName + "? (Y/N): ");
-        String confirm = sc.next();
-        if (!confirm.equalsIgnoreCase("Y")) {
-            System.out.println(" Transfer cancelled.");
+        if (!rsReceiver.next()) {
+            System.out.println("⚠ Recipient account not found!");
             return;
         }
 
-        // Get amount with retry logic
-        BigDecimal amount = inputAmountWithRetry("transfer");
-        if (amount.compareTo(BigDecimal.ZERO) == 0) return;
+        String receiverName = rsReceiver.getString("holder_name");
 
+        // Step 3: Ask for transfer confirmation
+        sc.nextLine(); // clear buffer
+        System.out.print("Confirm transfer of ₹" + amount + " to " + receiverName + " (yes/no): ");
+        String confirm = sc.nextLine().trim().toLowerCase();
 
+        if (!confirm.equals("yes")) {
+            System.out.println(" Transaction cancelled by user.");
+            return;
+        }
 
+        // Step 4: OTP generation
+        String otp = sendOTP(senderEmail);
+        long otpSentTime = System.currentTimeMillis();
+
+        System.out.print("Enter OTP sent to your email (valid for 2 minutes): ");
+        String enteredOtp = sc.nextLine().trim();
+        long otpEnteredTime = System.currentTimeMillis();
+
+        // Step 5: OTP validation
+        long timeDiff = otpEnteredTime - otpSentTime;
+        if (timeDiff >= 120000) { // 2 minutes = 120,000 ms
+            System.out.println(" OTP expired! Please try again.");
+            return;
+        }
+
+        if (!enteredOtp.equals(otp)) {
+            System.out.println(" Incorrect OTP! Transaction cancelled.");
+            return;
+        }
+
+        // Step 6: Proceed with transfer
         conn.setAutoCommit(false);
         try {
-            PreparedStatement withdraw = conn.prepareStatement(
-                    "UPDATE accounts SET balance = balance - ? WHERE account_number=? AND balance >= ?"
+            PreparedStatement debit = conn.prepareStatement(
+                    "UPDATE accounts SET balance = balance - ? WHERE account_number = ?"
             );
-            withdraw.setBigDecimal(1, amount);
-            withdraw.setInt(2, loggedInAccount);
-            withdraw.setBigDecimal(3, amount);
-            int rows = withdraw.executeUpdate();
+            debit.setBigDecimal(1, amount);
+            debit.setInt(2, loggedInAccount);
+            debit.executeUpdate();
 
-            if (rows == 0) {
-                System.out.println(" Insufficient funds!");
-                conn.rollback();
-                return;
-            }
-
-            // Deposit into receiver
-            PreparedStatement deposit = conn.prepareStatement(
-                    "UPDATE accounts SET balance = balance + ? WHERE account_number=?"
+            PreparedStatement credit = conn.prepareStatement(
+                    "UPDATE accounts SET balance = balance + ? WHERE account_number = ?"
             );
-            deposit.setBigDecimal(1, amount);
-            deposit.setInt(2, toAcc);
-            deposit.executeUpdate();
+            credit.setBigDecimal(1, amount);
+            credit.setInt(2, toAccount);
+            credit.executeUpdate();
 
-
-
-            // Log for sender (Debit)
-            PreparedStatement logSender = conn.prepareStatement(
-                    "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
+            PreparedStatement log = conn.prepareStatement(
+                    "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, 'transfer')"
             );
-            logSender.setInt(1, loggedInAccount);
-            logSender.setInt(2, toAcc);
-            logSender.setBigDecimal(3, amount);
-            logSender.setString(4, "TRANSFER_SENT");
-            logSender.executeUpdate();
-
-// Log for receiver (Credit)
-            PreparedStatement logReceiver = conn.prepareStatement(
-                    "INSERT INTO transactions(from_account, to_account, amount, type) VALUES (?, ?, ?, ?)"
-            );
-            logReceiver.setInt(1, toAcc);           // receiver
-            logReceiver.setInt(2, loggedInAccount); // sender
-            logReceiver.setBigDecimal(3, amount);
-            logReceiver.setString(4, "TRANSFER_RECEIVED");
-            logReceiver.executeUpdate();
-
-
+            log.setInt(1, loggedInAccount);
+            log.setInt(2, toAccount);
+            log.setBigDecimal(3, amount);
+            log.executeUpdate();
 
             conn.commit();
-            System.out.println(" Transfer successful to " + receiverName + "!");
-            viewBalance(conn, loggedInAccount);
-            FraudDetection.checkFraud(conn, loggedInAccount, amount);
+
+            System.out.println(" Transaction successful!");
+            System.out.println(" ₹" + amount + " transferred to " + receiverName);
 
 
-        } catch (SQLException e) {
+        } catch (Exception e) {
             conn.rollback();
-            System.out.println(" Transfer failed: " + e.getMessage());
+            System.out.println(" Transaction failed: " + e.getMessage());
         } finally {
             conn.setAutoCommit(true);
         }
     }
+
+
 
     private static void viewBalance(Connection conn, int accNo) throws SQLException {
         PreparedStatement ps = conn.prepareStatement("SELECT balance FROM accounts WHERE account_number=?");
