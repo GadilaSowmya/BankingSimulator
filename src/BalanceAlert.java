@@ -65,7 +65,6 @@ public class BalanceAlert {
                             "Regards,\n" +
                             "SecureBank Support Team"
             );
-
             Transport.send(message);
             System.out.println("📩 Low balance alert email sent to: " + email);
 

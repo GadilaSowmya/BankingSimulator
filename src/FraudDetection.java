@@ -15,13 +15,13 @@ public class FraudDetection {
             boolean suspicious = false;
             String reason = "";
 
-            // 🧾 1️⃣ Check high-value transactions
+            //  Check high-value transactions
             if (amount.compareTo(new BigDecimal("15000")) > 0) {
                 suspicious = true;
                 reason = "High-value transaction detected (₹" + amount + ")";
             }
 
-            // ⚡ 2️⃣ Check frequency (more than 5 transfers in 1 minute)
+            //  Check frequency (more than 5 transfers in 1 minute)
             PreparedStatement ps = conn.prepareStatement(
                     "SELECT COUNT(*) FROM transactions WHERE from_account = ? " +
                             "AND type IN ('TRANSFER_SENT', 'TRANSFER_RECEIVED') " +
@@ -35,7 +35,7 @@ public class FraudDetection {
                 reason = "Multiple transfers (5+) within 1 minute.";
             }
 
-            //  3️⃣ If suspicious, insert record & send email alert
+            //  If suspicious, insert record & send email alert
             if (suspicious) {
                 PreparedStatement alertPs = conn.prepareStatement(
                         "INSERT INTO fraud_alerts(account_number, reason, timestamp) VALUES (?, ?, NOW())"
@@ -54,7 +54,7 @@ public class FraudDetection {
         }
     }
 
-    // ✉️ Send fraud alert email
+    // Send fraud alert email
     private static void sendFraudAlertEmail(Connection conn, int accNo, String reason) {
         try {
             PreparedStatement ps = conn.prepareStatement("SELECT email, holder_name FROM accounts WHERE account_number=?");
@@ -82,7 +82,7 @@ public class FraudDetection {
             Message message = new MimeMessage(session);
             message.setFrom(new InternetAddress(SENDER_EMAIL));
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(recipientEmail));
-            message.setSubject("⚠️ Fraud Alert: Unusual Activity Detected");
+            message.setSubject(" Fraud Alert: Unusual Activity Detected");
             message.setText(
                     "Dear " + holderName + ",\n\n" +
                             "We detected unusual activity on your account (A/C No: " + accNo + ").\n\n" +

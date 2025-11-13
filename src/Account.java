@@ -34,7 +34,6 @@ public class Account {
     public BigDecimal getBalance() {
         return balance;
     }
-
     public void deposit(BigDecimal amount) throws Exception {
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new Exception("Amount must be positive");

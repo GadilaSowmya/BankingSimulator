@@ -665,7 +665,6 @@ public class AccountApp {
             System.out.println(" Insufficient funds!");
             return;
         }
-
         // Step 2: Verify recipient
         PreparedStatement psReceiver = conn.prepareStatement(
                 "SELECT holder_name FROM accounts WHERE account_number = ?"
