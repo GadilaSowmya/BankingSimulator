@@ -657,7 +657,6 @@ public class AccountApp {
             System.out.println("⚠ Invalid sender account!");
             return;
         }
-
         String senderName = rsSender.getString("holder_name");
         String senderEmail = rsSender.getString("email");
         BigDecimal senderBalance = rsSender.getBigDecimal("balance");
