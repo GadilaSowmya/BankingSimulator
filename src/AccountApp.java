@@ -665,9 +665,10 @@ public class AccountApp {
             System.out.println(" Insufficient funds!");
             return;
         }
+
         // Step 2: Verify recipient
         PreparedStatement psReceiver = conn.prepareStatement(
-                "SELECT holder_name FROM accounts WHERE account_number = ?"
+                "SELECT holder_name, email FROM accounts WHERE account_number = ?"
         );
         psReceiver.setInt(1, toAccount);
         ResultSet rsReceiver = psReceiver.executeQuery();
@@ -678,6 +679,7 @@ public class AccountApp {
         }
 
         String receiverName = rsReceiver.getString("holder_name");
+        String receiverEmail = rsReceiver.getString("email");
 
         // Step 3: Ask for transfer confirmation
         sc.nextLine(); // clear buffer
@@ -739,7 +741,11 @@ public class AccountApp {
             System.out.println(" Transaction successful!");
             System.out.println(" ₹" + amount + " transferred to " + receiverName);
 
-
+            // Send confirmation emails to both parties
+            sendTransferReceipt(senderEmail, receiverEmail, senderName, receiverName, amount, loggedInAccount, toAccount);
+            viewBalance(conn, loggedInAccount);
+            FraudDetection.checkFraud(conn, loggedInAccount, amount);
+            BalanceAlert.checkLowBalance(conn, loggedInAccount);
         } catch (Exception e) {
             conn.rollback();
             System.out.println(" Transaction failed: " + e.getMessage());
@@ -747,6 +753,79 @@ public class AccountApp {
             conn.setAutoCommit(true);
         }
     }
+    private static void sendTransferReceipt(String senderEmail, String receiverEmail,
+                                            String senderName, String receiverName,
+                                            BigDecimal amount, int fromAcc, int toAcc) {
+        final String senderBankEmail = "gadilasowmya147@gmail.com";
+        final String senderPassword = "pkay chfx qyst gnvy";
+
+        Properties props = new Properties();
+        props.put("mail.smtp.auth", "true");
+        props.put("mail.smtp.starttls.enable", "true");
+        props.put("mail.smtp.host", "smtp.gmail.com");
+        props.put("mail.smtp.port", "587");
+
+        Session session = Session.getInstance(props, new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(senderBankEmail, senderPassword);
+            }
+        });
+
+        try {
+            // Email for sender
+            Message senderMsg = new MimeMessage(session);
+            senderMsg.setFrom(new InternetAddress(senderBankEmail));
+            senderMsg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(senderEmail));
+            senderMsg.setSubject("Transaction Confirmation - ₹" + amount + " Transferred");
+            senderMsg.setText("""
+                Dear %s,
+
+                Your fund transfer was successful.
+
+                Details:
+                - From Account: %d
+                - To Account: %d
+                - Beneficiary: %s
+                - Amount: ₹%s
+                - Status: Successful
+                - Date: %s
+
+                Thank you for banking with us!
+                """.formatted(senderName, fromAcc, toAcc, receiverName, amount, new java.util.Date()));
+
+            Transport.send(senderMsg);
+
+            // Email for receiver
+            Message receiverMsg = new MimeMessage(session);
+            receiverMsg.setFrom(new InternetAddress(senderBankEmail));
+            receiverMsg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(receiverEmail));
+            receiverMsg.setSubject("Amount Credited - ₹" + amount + " Received");
+            receiverMsg.setText("""
+                Dear %s,
+
+                You have received a new fund transfer.
+
+                Details:
+                - From Account: %d
+                - Sender: %s
+                - To Account: %d
+                - Amount: ₹%s
+                - Status: Credited
+                - Date: %s
+
+                Thank you for banking with us!
+                """.formatted(receiverName, fromAcc, senderName, toAcc, amount, new java.util.Date()));
+
+            Transport.send(receiverMsg);
+
+            System.out.println(" Transaction confirmation emails sent to both sender and receiver.");
+
+        } catch (Exception e) {
+            System.out.println(" Failed to send transaction emails: " + e.getMessage());
+        }
+    }
+
 
 
 
